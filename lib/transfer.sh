@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+GAME_LIBRARY_MUTATION_COUNT=0
+
+mark_game_library_mutation() {
+  GAME_LIBRARY_MUTATION_COUNT=$((GAME_LIBRARY_MUTATION_COUNT+1))
+}
+
 free_bytes() {
   df -B1 --output=avail "$1" | tail -n1 | tr -d ' '
 }
@@ -221,6 +227,7 @@ move_to_sd2() {
 
   rm -rf -- "$backup"
   manifest_add "$rel" "$kind"
+  mark_game_library_mutation
   log "Moved to SD2: $rel"
 }
 
@@ -257,12 +264,14 @@ move_to_sd1() {
   show_finalizing_transfer "Removing the SD2 source and updating storage records..."
   rm -rf -- "$src"
   manifest_remove "$rel"
+  mark_game_library_mutation
   log "Moved to SD1: $rel"
 }
 
 move_group_to_sd2() {
   local primary="$1" rel resolved
   local -a members moved=()
+  battery_allows_heavy_operation || { fail "$BATTERY_BLOCK_REASON"; return 1; }
   resolved="$(resolve_game_group "$primary")" || return 1
   mapfile -t members <<< "$resolved"
   ((${#members[@]})) || { fail "No files found for game: $primary"; return 1; }
@@ -290,6 +299,7 @@ move_group_to_sd2() {
 
 move_group_to_sd1() {
   local primary="$1" rel resolved
+  battery_allows_heavy_operation || { fail "$BATTERY_BLOCK_REASON"; return 1; }
   mount_sd2 || return 1
   local -a members moved=()
   resolved="$(resolve_game_group "$primary")" || return 1
@@ -318,22 +328,27 @@ move_group_to_sd1() {
 }
 
 delete_item_permanently() {
-  local rel="$1" location src_sd1="$ROMS_ROOT/$rel" src_sd2="$ROMS2_ROOT/$rel"
+  local rel="$1" location src_sd1 src_sd2
+  src_sd1="$ROMS_ROOT/$rel"
+  src_sd2="$ROMS2_ROOT/$rel"
   validate_manifest_rel "$rel" || { fail "Invalid or unsupported item path: $rel"; return 1; }
   location="$(item_location "$rel")"
 
   case "$location" in
     SD1)
       rm -rf -- "$src_sd1" || { fail "Could not delete from SD1: $rel"; return 1; }
+      mark_game_library_mutation
       ;;
     SD2)
       unbind_one "$src_sd1" || { fail "Could not unmount before deleting: $rel"; return 1; }
       rm -rf -- "$src_sd1"
       rm -rf -- "$src_sd2" || { fail "Could not delete from SD2: $rel"; return 1; }
+      mark_game_library_mutation
       manifest_remove "$rel"
       ;;
     SD2-unmounted)
       rm -rf -- "$src_sd2" || { fail "Could not delete from SD2: $rel"; return 1; }
+      mark_game_library_mutation
       rm -rf -- "$src_sd1"
       manifest_remove "$rel"
       ;;
@@ -345,6 +360,7 @@ delete_item_permanently() {
 delete_game_group() {
   local primary="$1" rel resolved deleted=0
   local -a members
+  battery_allows_heavy_operation || { fail "$BATTERY_BLOCK_REASON"; return 1; }
   resolved="$(resolve_game_group "$primary")" || return 1
   mapfile -t members <<< "$resolved"
   ((${#members[@]})) || { fail "No files found for game: $primary"; return 1; }
@@ -361,22 +377,36 @@ delete_game_group() {
 }
 
 repair_storage() {
-  mount_sd2
-  rebuild_binds
+  local progress_fd="${1:-}" status_file="${2:-}" total=0 processed=0 new_binds=0
+  inventory_progress "$progress_fd" 2 "Checking the active SD2 card..."
+  mount_sd2 || return 1
+  rebuild_binds "$progress_fd" || return 1
 
   local manifest="$ROMS2_ROOT/.roms2-manifest.tsv"
-  [[ -f "$manifest" ]] || return 0
+  if [[ ! -f "$manifest" ]]; then
+    [[ -z "$status_file" ]] || printf '0\n' > "$status_file"
+    inventory_progress "$progress_fd" 100 "No game links to repair."
+    return 0
+  fi
+  new_binds=$SWITCH_NEW_BINDS
+  total="$(awk 'NF && $1 !~ /^#/ { count++ } END { print count+0 }' "$manifest")"
   while IFS=$'\t' read -r rel kind; do
     [[ -n "$rel" ]] || continue
+    [[ "$rel" == \#* ]] && continue
+    processed=$((processed+1))
+    inventory_progress "$progress_fd" $((70 + processed * 29 / (total > 0 ? total : 1))) \
+      "Checking game links: $processed/$total"
     local src="$ROMS2_ROOT/$rel" dst="$ROMS_ROOT/$rel"
     if [[ ! -e "$src" ]]; then
       log "Manifest orphan: $rel"
       continue
     fi
     if ! mountpoint -q "$dst" 2>/dev/null; then
-      bind_item "$src" "$dst" || true
+      if bind_item "$src" "$dst"; then new_binds=$((new_binds+1)); fi
     fi
   done < "$manifest"
+  [[ -z "$status_file" ]] || printf '%s\n' "$new_binds" > "$status_file"
+  inventory_progress "$progress_fd" 100 "Repair complete."
 }
 
 IMPORT_ADDED=0

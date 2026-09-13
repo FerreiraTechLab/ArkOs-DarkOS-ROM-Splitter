@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 CURRENT_SD2_UUID=""
 SWITCH_BOUND=0
+SWITCH_NEW_BINDS=0
 SWITCH_CONFLICTS=0
 SWITCH_MISSING=0
 
@@ -185,26 +186,37 @@ bind_item() {
 }
 
 rebuild_binds() {
-  mount_sd2
+  local progress_fd="${1:-}" total=0 processed=0
+  mount_sd2 || return 1
   sync_manifest_cache
   local manifest="$ROMS2_ROOT/.roms2-manifest.tsv"
-  local rel kind src dst
+  local rel kind src dst already_bound
   SWITCH_BOUND=0
+  SWITCH_NEW_BINDS=0
   SWITCH_CONFLICTS=0
   SWITCH_MISSING=0
-  [[ -f "$manifest" ]] || return 0
+  [[ -f "$manifest" ]] || { inventory_progress "$progress_fd" 70 "No SD2 manifest to rebuild."; return 0; }
+  total="$(awk 'NF && $1 !~ /^#/ { count++ } END { print count+0 }' "$manifest")"
 
   while IFS=$'\t' read -r rel kind; do
     [[ -n "$rel" ]] || continue
     [[ "$rel" == \#* ]] && continue
+    processed=$((processed+1))
+    inventory_progress "$progress_fd" $((5 + processed * 65 / (total > 0 ? total : 1))) \
+      "Rebuilding game links: $processed/$total"
     src="$ROMS2_ROOT/$rel"; dst="$ROMS_ROOT/$rel"
     if [[ ! -e "$src" ]]; then
       SWITCH_MISSING=$((SWITCH_MISSING+1))
       log "Missing manifest source: $src"
       continue
     fi
+    already_bound=0
+    if mountpoint -q "$dst" 2>/dev/null || { [[ "${ROMS2_DEMO:-0}" == 1 ]] && [[ -L "$dst" ]]; }; then
+      already_bound=1
+    fi
     if bind_item "$src" "$dst" "$rel"; then
       SWITCH_BOUND=$((SWITCH_BOUND+1))
+      if ((already_bound == 0)); then SWITCH_NEW_BINDS=$((SWITCH_NEW_BINDS+1)); fi
     else
       SWITCH_CONFLICTS=$((SWITCH_CONFLICTS+1))
       log "Failed bind: $rel"

@@ -6,10 +6,18 @@ if command -v dialog >/dev/null 2>&1; then UI_BIN="dialog"; elif command -v whip
 
 UI_HEIGHT=10
 UI_WIDTH=60
+APP_VERSION="unknown"
+if [[ -r "${ROMS2_BASE_DIR:-}/VERSION" ]]; then
+  APP_VERSION="$(tr -d '[:space:]' < "$ROMS2_BASE_DIR/VERSION")"
+fi
+ES_RESTART_PENDING=0
+APP_EXIT_REQUESTED=0
 
 ui_size_for_text() {
   local text="$1" extra_rows="${2:-5}" min_height="${3:-8}" max_height="${4:-20}"
   local content_width=52 lines=0 line length
+  # dialog renders literal \n sequences as line breaks; size for those rows.
+  text="${text//\\n/$'\n'}"
   while IFS= read -r line || [[ -n "$line" ]]; do
     length=${#line}
     lines=$((lines + (length > 0 ? (length + content_width - 1) / content_width : 1)))
@@ -18,27 +26,17 @@ ui_size_for_text() {
   ((UI_HEIGHT < min_height)) && UI_HEIGHT=$min_height
   ((UI_HEIGHT > max_height)) && UI_HEIGHT=$max_height
   UI_WIDTH=60
-  ((lines > 8)) && UI_WIDTH=68
   # Arithmetic tests return 1 when false; never leak that status to callers
   # because the application runs with set -e.
   return 0
-}
-
-ui_prompt_with_controls() {
-  local prompt="$1"
-  if declare -F controller_help_text >/dev/null 2>&1; then
-    printf '%s\n\n%s' "$prompt" "$(controller_help_text)"
-  else
-    printf '%s' "$prompt"
-  fi
 }
 
 ui_msg() {
   local title="$1" text="$2"
   if [[ -n "$UI_BIN" ]]; then
     local display_text
-    display_text="$(ui_prompt_with_controls "$text")"
-    ui_size_for_text "$display_text" 4 8 18
+    display_text="$text\nA: OK"
+    ui_size_for_text "$display_text" 3 7 14
     "$UI_BIN" --title "$title" --msgbox "$display_text" "$UI_HEIGHT" "$UI_WIDTH" || true
   else
     printf '\n[%s]\n%s\n' "$title" "$text"
@@ -59,8 +57,8 @@ ui_yesno() {
   local title="$1" text="$2"
   if [[ -n "$UI_BIN" ]]; then
     local display_text
-    display_text="$(ui_prompt_with_controls "$text")"
-    ui_size_for_text "$display_text" 5 9 20
+    display_text="$text\nA: Yes | B: No"
+    ui_size_for_text "$display_text" 4 8 15
     "$UI_BIN" --title "$title" --yesno "$display_text" "$UI_HEIGHT" "$UI_WIDTH"
   else
     read -r -p "$text [y/N] " ans
@@ -73,15 +71,14 @@ ui_menu() {
   if [[ -n "$UI_BIN" ]]; then
     local item_count=$(( $# / 2 )) menu_height height width menu_prompt
     menu_height=$item_count
-    ((menu_height > 12)) && menu_height=12
+    ((menu_height > 8)) && menu_height=8
     # Menus do not use X/checklist controls, so keep their help on one compact
     # line and reserve the detailed help text for checklist screens.
-    menu_prompt="$prompt\n\nD-Pad: Navigate | A: Confirm | B: Back"
-    height=$((menu_height + 7))
+    menu_prompt="$prompt\nD-Pad: Navigate | A: Confirm | B: Back"
+    height=$((menu_height + 6))
     ((height < 9)) && height=9
     ((height > 22)) && height=22
-    width=72
-    ((item_count <= 4)) && width=60
+    width=60
     "$UI_BIN" --clear --title "$title" --menu "$menu_prompt" "$height" "$width" "$menu_height" "$@" 3>&1 1>&2 2>&3
   else
     local args=("$@") i=0
@@ -98,10 +95,9 @@ ui_checklist() {
     local item_count=$(( $# / 3 )) list_height height
     list_height=$item_count
     ((list_height < 3)) && list_height=3
-    ((list_height > 12)) && list_height=12
-    height=$((list_height + 9))
-    ((height > 22)) && height=22
-    "$UI_BIN" --separate-output --title "$title" --checklist "$(ui_prompt_with_controls "$prompt")" "$height" 72 "$list_height" "$@" 3>&1 1>&2 2>&3
+    ((list_height > 8)) && list_height=8
+    height=$((list_height + 7))
+    "$UI_BIN" --separate-output --title "$title" --checklist "$prompt\nD-Pad: Navigate | X: Select | A: Confirm | B: Back" "$height" 62 "$list_height" "$@" 3>&1 1>&2 2>&3
   else
     local args=("$@") i=0 answer token
     printf '\n%s\n%s\n' "$title" "$prompt" >&2
@@ -117,11 +113,39 @@ ui_checklist() {
 ui_gauge() {
   local title="$1" prompt="$2"
   if [[ -n "$UI_BIN" ]]; then
-    "$UI_BIN" --title "$title" --gauge "$prompt" 9 68 0
+    "$UI_BIN" --title "$title" --gauge "$prompt" 8 60 0
   else
     # Keep noninteractive/keyboard-only execution quiet while consuming input.
     while IFS= read -r _; do :; done
   fi
+}
+
+ui_backend_quiet() {
+  "$@" >>"$LOG_FILE" 2>&1
+}
+
+schedule_emulationstation_restart() {
+  local systemctl_bin unit
+  systemctl_bin="$(command -v systemctl)" || return 1
+  command -v systemd-run >/dev/null 2>&1 || return 1
+  systemctl cat emulationstation.service >/dev/null 2>&1 || return 1
+  unit="rom-splitter-es-restart-$(date +%s)-$BASHPID"
+  run_root systemd-run --quiet --on-active=3s --unit="$unit" \
+    "$systemctl_bin" restart emulationstation.service
+  log "Scheduled EmulationStation restart: $unit"
+}
+
+offer_emulationstation_restart() {
+  ((ES_RESTART_PENDING)) || return 0
+  ui_yesno "Refresh game list" "Games changed. Restart EmulationStation now to refresh its game list?" || return 0
+  if ui_backend_quiet schedule_emulationstation_restart; then
+    ES_RESTART_PENDING=0
+    APP_EXIT_REQUESTED=1
+    ui_infobox "Restarting" "EmulationStation will restart shortly."
+  else
+    ui_msg "Restart unavailable" "Could not schedule the EmulationStation restart. Your changes are safe; try again when exiting."
+  fi
+  return 0
 }
 
 build_system_menu_cache() {
@@ -159,7 +183,7 @@ show_storage_info() {
   else
     s2="SD2: not mounted"
   fi
-  ui_msg "Storage" "$s1\n$s2\n\n$(sd2_info)"
+  ui_msg "Storage" "$s1\n$s2\n\n$(sd2_info 2>>"$LOG_FILE")"
 }
 
 choose_system() {
@@ -169,7 +193,7 @@ choose_system() {
     if [[ -n "$supplied_systems" ]]; then
       while read -r s; do [[ -n "$s" ]] && opts+=("$s" "$s"); done <<< "$supplied_systems"
     else
-      while read -r s; do [[ -n "$s" ]] && opts+=("$s" "$s"); done < <(systems_for_storage "$storage_filter")
+      while read -r s; do [[ -n "$s" ]] && opts+=("$s" "$s"); done < <(systems_for_storage "$storage_filter" 2>>"$LOG_FILE")
     fi
   else
     while read -r s; do [[ -n "$s" ]] && opts+=("$s" "$s"); done < <(systems_from_es)
@@ -202,7 +226,7 @@ manage_system() {
       id=0
       scan_file="$(mktemp "$STATE_DIR/system-scan.XXXXXX")"
       set +e
-      build_system_menu_cache "$system" "$scan_file" 3>&1 | ui_gauge "Scanning games" "Scanning $system..."
+      build_system_menu_cache "$system" "$scan_file" 3>&1 >>"$LOG_FILE" 2>&1 | ui_gauge "Scanning games" "Scanning $system..."
       scan_pipeline_status=("${PIPESTATUS[@]}")
       scan_rc=${scan_pipeline_status[0]:-1}
       gauge_rc=${scan_pipeline_status[1]:-1}
@@ -269,6 +293,17 @@ manage_system() {
       "move" "Move to $destination" \
       "delete" "Permanently delete")" || continue
 
+    case "$chosen_action" in
+      move|delete)
+        if ! battery_allows_heavy_operation; then
+          ui_msg "Battery protection" "$BATTERY_BLOCK_REASON"
+          continue
+        fi
+        if [[ -n "$BATTERY_WARNING" ]]; then ui_msg "Battery warning" "$BATTERY_WARNING"; fi
+        ;;
+      *) continue ;;
+    esac
+
     local action result_title
     case "$chosen_action" in
       move)
@@ -285,13 +320,30 @@ manage_system() {
       *) continue ;;
     esac
 
-    local completed=0 failed=0
+    local completed=0 failed=0 battery_stopped=0 battery_warned=0 before_mutations=$GAME_LIBRARY_MUTATION_COUNT
+    [[ -z "$BATTERY_WARNING" ]] || battery_warned=1
     for selected_id in "${selected[@]}"; do
       item="${games[selected_id]:-}"
       [[ -n "$item" ]] || continue
+      if ! battery_allows_heavy_operation; then
+        battery_stopped=1
+        ui_msg "Battery protection" "$BATTERY_BLOCK_REASON\n\nRemaining games were not processed."
+        break
+      fi
+      if [[ -n "$BATTERY_WARNING" ]] && ((battery_warned == 0)); then
+        ui_msg "Battery warning" "$BATTERY_WARNING"
+        battery_warned=1
+      fi
       if "$action" "$system/$item"; then completed=$((completed+1)); else failed=$((failed+1)); fi
     done
-    ui_msg "$result_title" "Completed: $completed\nFailed: $failed\n\nSee the log for details."
+    local result_note=""
+    if ((battery_stopped)); then result_note="\nRemaining games skipped: low battery."; fi
+    ui_msg "$result_title" "Completed: $completed\nFailed: $failed$result_note\n\nSee the log for details."
+    if ((GAME_LIBRARY_MUTATION_COUNT > before_mutations)); then
+      ES_RESTART_PENDING=1
+      offer_emulationstation_restart
+      ((APP_EXIT_REQUESTED == 0)) || return 0
+    fi
     # A real storage mutation invalidates locations and item membership. Simple
     # navigation, empty selection and cancelled dialogs keep the current cache.
     needs_refresh=1
@@ -299,10 +351,11 @@ manage_system() {
 }
 
 manage_games() {
-  mount_sd2 || { ui_msg "SD2" "No configured ROMS2 card was found."; return; }
+  ui_backend_quiet mount_sd2 || { ui_msg "SD2" "No configured ROMS2 card was found."; return 0; }
   local sys
   while sys="$(choose_system)"; do
     manage_system "$sys"
+    ((APP_EXIT_REQUESTED == 0)) || return 0
   done
 }
 
@@ -310,7 +363,7 @@ manage_games_by_storage() {
   local storage sys available_systems systems_file scan_rc gauge_rc
   local -a pipeline_status
   while storage="$(choose_storage)"; do
-    if [[ "$storage" == SD2 ]] && ! mount_sd2; then
+    if [[ "$storage" == SD2 ]] && ! ui_backend_quiet mount_sd2; then
       ui_msg "SD2" "No configured ROMS2 card was found."
       continue
     fi
@@ -320,7 +373,7 @@ manage_games_by_storage() {
       set +e
       # Duplicate the pipeline into fd 3 first, then redirect normal output to
       # the cache file. Reversing this order mixes gauge protocol into systems.
-      systems_for_storage "$storage" 3 3>&1 > "$systems_file" | \
+      systems_for_storage "$storage" 3 3>&1 > "$systems_file" 2>>"$LOG_FILE" | \
         ui_gauge "Scanning $storage" "Looking for systems with games..."
       pipeline_status=("${PIPESTATUS[@]}")
       scan_rc=${pipeline_status[0]:-1}
@@ -339,6 +392,7 @@ manage_games_by_storage() {
       fi
       sys="$(choose_system "$storage" "$available_systems")" || break
       manage_system "$sys" "$storage"
+      ((APP_EXIT_REQUESTED == 0)) || return 0
     done
   done
 }
@@ -348,25 +402,71 @@ format_sd2_ui() {
     ui_msg "Demo mode" "Formatting is disabled in demo mode."
     return
   fi
-  local opts=() dev size model chosen
-  while IFS='|' read -r dev size model; do opts+=("$dev" "$size $model"); done < <(list_candidate_sd2_devices)
+  local opts=() dev size model chosen format_rc gauge_rc mounted_part mounted_dev mounted_uuid missing had_binds=0
+  local -a pipeline_status
+  while IFS='|' read -r dev size model; do opts+=("$dev" "$size $model"); done < <(list_candidate_sd2_devices 2>>"$LOG_FILE")
   ((${#opts[@]})) || { ui_msg "Prepare SD2" "No safe candidate device was detected."; return; }
-  chosen="$(ui_menu "Prepare SD2" "Select the SECONDARY card. The selected device will be ERASED." "${opts[@]}")" || return
-  ui_yesno "DANGER" "ALL DATA on $chosen will be erased.\n\nThe system disk and /roms disk are protected, but verify the device before continuing.\n\nFormat as exFAT and label ROMS2?" || return
-  if prepare_sd2_device "$chosen"; then
-    mount_sd2
+  chosen="$(ui_menu "Prepare SD2" "Select the SECONDARY card. The selected device will be ERASED." "${opts[@]}")" || return 0
+  validate_not_system_device "$chosen" || { ui_msg "Prepare SD2" "System/SD1 device cannot be formatted."; return; }
+  missing="$(missing_format_tools)"
+  if [[ -n "$missing" ]]; then
+    ui_msg "Prepare SD2" "Formatting unavailable: missing $missing.\n\nNo game links were disconnected and the card was not modified."
+    return 0
+  fi
+  mounted_part="$(mounted_sd2_partition || true)"
+  mounted_dev=""
+  if [[ -n "$mounted_part" ]]; then
+    mounted_dev="$(lsblk -no PKNAME "$mounted_part" 2>/dev/null | head -n1)"
+    [[ -n "$mounted_dev" ]] && mounted_dev="/dev/$mounted_dev"
+  fi
+  if [[ "$mounted_dev" == "$chosen" ]]; then
+    [[ -s "$(active_binds_file)" ]] && had_binds=1
+    mounted_uuid="$(sd2_partition_uuid "$mounted_part" || true)"
+    [[ -n "$mounted_uuid" ]] || { ui_msg "Prepare SD2" "Could not identify the active SD2 card. Formatting blocked."; return; }
+    ui_yesno "SD2 in use" "The selected card ($chosen, UUID $mounted_uuid) is the ACTIVE SD2 and contains games.\n\nContinuing will disconnect its game links, unmount it and PERMANENTLY ERASE ALL DATA on it.\n\nContinue?" || return 0
+  elif lsblk -nrpo MOUNTPOINT "$chosen" | grep -q '^/'; then
+    ui_msg "Prepare SD2" "The selected device has mounted partitions not managed as the active SD2. Formatting blocked."
+    return
+  fi
+  ui_yesno "DANGER" "ALL DATA on $chosen will be erased.\n\nThe system disk and /roms disk are protected, but verify the device before continuing.\n\nFormat as exFAT and label ROMS2?" || return 0
+  if ! battery_allows_heavy_operation; then
+    ui_msg "Battery protection" "$BATTERY_BLOCK_REASON"
+    return 0
+  fi
+  if [[ -n "$BATTERY_WARNING" ]]; then ui_msg "Battery warning" "$BATTERY_WARNING"; fi
+  set +e
+  {
+    if [[ "$mounted_dev" == "$chosen" ]]; then
+      inventory_progress 3 2 "Disconnecting active SD2 game links..."
+      [[ "$(mounted_sd2_partition || true)" == "$mounted_part" ]] &&
+        [[ "$(sd2_partition_uuid "$mounted_part" || true)" == "$mounted_uuid" ]] &&
+        unmount_sd2 || { fail "Active SD2 changed or could not be safely unmounted. Formatting cancelled."; exit 1; }
+    fi
+    prepare_sd2_device "$chosen" 3 &&
+      inventory_progress 3 92 "Mounting the prepared card..." &&
+      mount_sd2 &&
+      inventory_progress 3 100 "Card ready."
+  } 3>&1 >>"$LOG_FILE" 2>&1 | ui_gauge "Prepare SD2" "Preparing the selected card..."
+  pipeline_status=("${PIPESTATUS[@]}")
+  format_rc=${pipeline_status[0]:-1}
+  gauge_rc=${pipeline_status[1]:-1}
+  set -e
+  if ((had_binds)) && [[ ! -s "$(active_binds_file)" ]]; then
+    ES_RESTART_PENDING=1
+  fi
+  if ((format_rc == 0 && gauge_rc == 0)); then
     ui_msg "Prepare SD2" "Card prepared successfully as ROMS2."
   else
-    ui_msg "Error" "Formatting failed. Check logs."
+    ui_msg "Error" "Formatting was cancelled or failed. The card may have been in use; check the log before retrying."
   fi
 }
 
 show_diagnostics() {
-  mount_sd2 || true
+  ui_backend_quiet mount_sd2 || true
   local text=""
   text+="ROMS mount: $(findmnt -n -o SOURCE,FSTYPE "$ROMS_ROOT" 2>/dev/null || echo missing)\n"
   text+="ROMS2 mount: $(findmnt -n -o SOURCE,FSTYPE "$ROMS2_ROOT" 2>/dev/null || echo not-mounted)\n"
-  text+="Configured SD2: $(sd2_info)\n"
+  text+="Configured SD2: $(sd2_info 2>>"$LOG_FILE")\n"
   text+="Active card profile: $(active_card_id 2>/dev/null || echo none)\n"
   text+="Known card profiles: $(known_card_profiles_count)\n"
   text+="Manifest entries: $(manifest_list 2>/dev/null | wc -l)\n"
@@ -375,59 +475,106 @@ show_diagnostics() {
 }
 
 scan_sd2_for_new_games() {
-  local status_file import_rc gauge_rc total=0
+  local status_file import_rc gauge_rc total=0 added=0 conflicts=0 failed=0
   local -a pipeline_status
+  if ! ui_backend_quiet mount_sd2; then
+    ui_msg "Scan SD2" "No ROMS2 card is available. Insert or activate a card, then scan again."
+    return 0
+  fi
   status_file="$(mktemp "$STATE_DIR/sd2-scan-status.XXXXXX")"
 
   set +e
-  import_new_sd2_items 3 "$status_file" 3>&1 | ui_gauge "Scanning SD2" "Looking for new games..."
+  import_new_sd2_items 3 "$status_file" 3>&1 >>"$LOG_FILE" 2>&1 | ui_gauge "Scanning SD2" "Looking for new games..."
   pipeline_status=("${PIPESTATUS[@]}")
   import_rc=${pipeline_status[0]:-1}
   gauge_rc=${pipeline_status[1]:-1}
   set -e
 
   if [[ -s "$status_file" ]]; then
-    IFS=$'\t' read -r IMPORT_ADDED IMPORT_CONFLICTS IMPORT_FAILED total < "$status_file"
+    IFS=$'\t' read -r added conflicts failed total < "$status_file"
   fi
   rm -f -- "$status_file"
-
   if ((import_rc == 0 && gauge_rc == 0)); then
-    ui_msg "Scan SD2" "New items linked: $IMPORT_ADDED\nConflicts skipped: $IMPORT_CONFLICTS\nFailures: $IMPORT_FAILED\n\nNew games are now available under /roms."
+    ui_msg "Scan SD2" "New items linked: $added\nConflicts skipped: $conflicts\nFailures: $failed\n\nNew games are now available under /roms."
   else
-    ui_msg "Scan SD2" "New items linked: $IMPORT_ADDED\nConflicts skipped: $IMPORT_CONFLICTS\nFailures: $IMPORT_FAILED\n\nCheck the log for failed items."
+    ui_msg "Scan SD2" "New items linked: $added\nConflicts skipped: $conflicts\nFailures: $failed\n\nCheck the log for failed items."
+  fi
+  if ((added > 0)); then
+    ES_RESTART_PENDING=1
+    offer_emulationstation_restart
+  fi
+  return 0
+}
+
+repair_storage_ui() {
+  local repair_rc gauge_rc new_binds=0 status_file
+  local -a pipeline_status
+  if ! ui_backend_quiet mount_sd2; then
+    ui_msg "Repair" "No ROMS2 card is available. Insert or activate a card, then retry."
+    return 0
+  fi
+  status_file="$(mktemp "$STATE_DIR/repair-status.XXXXXX")"
+  set +e
+  repair_storage 3 "$status_file" 3>&1 >>"$LOG_FILE" 2>&1 | ui_gauge "Repair SD2" "Rebuilding game links..."
+  pipeline_status=("${PIPESTATUS[@]}")
+  repair_rc=${pipeline_status[0]:-1}
+  gauge_rc=${pipeline_status[1]:-1}
+  set -e
+  if [[ -s "$status_file" ]]; then read -r new_binds < "$status_file"; fi
+  rm -f -- "$status_file"
+  if ((new_binds > 0)); then ES_RESTART_PENDING=1; fi
+  if ((repair_rc == 0 && gauge_rc == 0)); then
+    ui_msg "Repair" "Bind mounts checked and rebuilt. Check the log for any conflicts."
+  else
+    ui_msg "Repair" "Repair failed. Check the log for details."
   fi
   return 0
 }
 
 switch_sd2_ui() {
-  local old_card new_card
+  local old_card new_card had_binds=0
   old_card="$(active_card_id || true)"
+  [[ -s "$(active_binds_file)" ]] && had_binds=1
 
   if findmnt -rn "$ROMS2_ROOT" >/dev/null 2>&1 || [[ -n "$old_card" ]]; then
-    if ! unmount_sd2; then
+    if ! ui_backend_quiet unmount_sd2; then
       ui_msg "Switch SD2" "The current card could not be safely deactivated. Check the log and do not remove it."
-      return 1
+      return 0
     fi
+    if ((had_binds)); then ES_RESTART_PENDING=1; fi
   fi
 
   ui_yesno "Switch SD2" \
     "The previous SD2 is safely deactivated.\n\nRemove it, insert the desired ROMS2 card, then choose Yes to activate its profile.\n\nChoose No to leave SD2 disconnected." || return 0
 
   ui_infobox "Switch SD2" "Detecting the inserted card and rebuilding its game links..."
-  if activate_inserted_sd2; then
+  if ui_backend_quiet activate_inserted_sd2; then
     new_card="$(active_card_id || true)"
+    if ((SWITCH_NEW_BINDS > 0)); then ES_RESTART_PENDING=1; fi
     ui_msg "Switch SD2" \
       "Active card: ${new_card:-unknown}\nLinks created: $SWITCH_BOUND\nConflicts skipped: $SWITCH_CONFLICTS\nMissing items: $SWITCH_MISSING"
   else
     ui_msg "Switch SD2" "The inserted ROMS2 card could not be activated. No SD1 game was overwritten. Check the log."
-    return 1
+    return 0
   fi
+}
+
+unmount_sd2_ui() {
+  local had_binds=0
+  [[ -s "$(active_binds_file)" ]] && had_binds=1
+  if ui_backend_quiet unmount_sd2; then
+    if ((had_binds)); then ES_RESTART_PENDING=1; fi
+    ui_msg "SD2" "Unmounted safely."
+  else
+    ui_msg "SD2" "Unmount failed. Check the log."
+  fi
+  return 0
 }
 
 main_menu() {
   while true; do
     local choice
-    if ! choice="$(ui_menu "ROM Splitter" "ArkOS Dual Storage Manager" \
+    if ! choice="$(ui_menu "ROM Splitter v$APP_VERSION" "ArkOS Dual Storage Manager" \
       "1" "Manage games" \
       "2" "Manage games by storage" \
       "3" "Storage information" \
@@ -447,12 +594,26 @@ main_menu() {
       2) manage_games_by_storage ;;
       3) show_storage_info ;;
       4) format_sd2_ui ;;
-      5) repair_storage && ui_msg "Repair" "Bind mounts rebuilt." || ui_msg "Repair" "Repair failed. Check logs." ;;
+      5) repair_storage_ui ;;
       6) switch_sd2_ui ;;
-      7) unmount_sd2 && ui_msg "SD2" "Unmounted safely." || ui_msg "SD2" "Unmount failed." ;;
+      7) unmount_sd2_ui ;;
       8) show_diagnostics ;;
       9) scan_sd2_for_new_games ;;
-      0) break ;;
+      0)
+        if ((ES_RESTART_PENDING)); then
+          if ui_yesno "Refresh game list" "Games changed during this session. Restart EmulationStation before leaving?"; then
+            if ui_backend_quiet schedule_emulationstation_restart; then
+              ES_RESTART_PENDING=0
+              ui_infobox "Restarting" "EmulationStation will restart shortly."
+            else
+              ui_msg "Restart unavailable" "Could not schedule the restart. Your changes are safe; try again or exit without restarting."
+              continue
+            fi
+          fi
+        fi
+        break
+        ;;
     esac
+    ((APP_EXIT_REQUESTED == 0)) || break
   done
 }

@@ -16,7 +16,11 @@ log() {
 
 fail() {
   log "ERROR: $*"
-  printf '%s\n' "$*" >&2
+  # Technical errors should not overwrite an active dialog screen. UI callers
+  # report a user-facing message; non-UI callers still receive stderr.
+  if [[ -z "${UI_BIN:-}" ]]; then
+    printf '%s\n' "$*" >&2
+  fi
   return 1
 }
 
@@ -34,6 +38,44 @@ run_root() {
   else
     sudo "$@"
   fi
+}
+
+BATTERY_BLOCK_REASON=""
+BATTERY_WARNING=""
+
+battery_allows_heavy_operation() {
+  BATTERY_BLOCK_REASON=""
+  BATTERY_WARNING=""
+  [[ "${ROMS2_DEMO:-0}" != 1 ]] || return 0
+
+  local supply type capacity found=0 unknown=0 root="${ROMS2_POWER_SUPPLY_ROOT:-/sys/class/power_supply}"
+  for supply in "$root"/*; do
+    [[ -d "$supply" ]] || continue
+    [[ -r "$supply/type" ]] || continue
+    type=""
+    IFS= read -r type < "$supply/type" || true
+    [[ "$type" == Battery ]] || continue
+    found=1
+    if [[ ! -r "$supply/capacity" ]]; then
+      unknown=1
+      continue
+    fi
+    capacity=""
+    IFS= read -r capacity < "$supply/capacity" || true
+    if [[ ! "$capacity" =~ ^[0-9]+$ ]] || ((10#$capacity > 100)); then
+      unknown=1
+      continue
+    fi
+    if ((10#$capacity <= 20)); then
+      BATTERY_BLOCK_REASON="Battery is at $((10#$capacity))%. Charge above 20% before moving, deleting or formatting."
+      return 1
+    fi
+  done
+
+  if ((found == 0 || unknown)); then
+    BATTERY_WARNING="Battery level could not be verified. You can continue, but charge the console before moving, deleting or formatting."
+  fi
+  return 0
 }
 
 human_size() {

@@ -161,6 +161,15 @@ sync_manifest_cache() {
       profile="$(card_profile_manifest "$card_id")"
       cp -f -- "$manifest" "$profile"
     fi
+  elif [[ "${ROMS2_DEMO:-0}" == 1 ]] || findmnt -rn "$ROMS2_ROOT" >/dev/null 2>&1; then
+    # A freshly formatted/replaced card has no manifest yet. Do not let the
+    # previous card's cached entries hide its games from the first scan.
+    : > "$cache"
+    card_id="$(active_card_id || true)"
+    if [[ -n "$card_id" ]]; then
+      profile="$(card_profile_manifest "$card_id")"
+      : > "$profile"
+    fi
   fi
 }
 

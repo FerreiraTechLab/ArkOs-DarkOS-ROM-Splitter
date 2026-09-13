@@ -59,6 +59,9 @@ sudo cp /tmp/roms2-manager.service "$SERVICE"
 sudo systemctl daemon-reload
 sudo systemctl enable roms2-manager.service
 
+source "$BASE_DIR/lib/dependencies.sh"
+install_optional_format_tools
+
 echo "Installed. ROM launcher: $TARGET"
 echo "System launcher: $SYSTEM_TARGET"
 echo "Boot service: roms2-manager.service"

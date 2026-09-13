@@ -6,7 +6,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history and known limitations.
 
 Games stored physically on SD2 are bind-mounted back to their original `/roms/<system>/<game>` locations. If SD2 is absent, the console and games remaining on SD1 continue to work normally.
 
-> **Release candidate:** version 1.0.0-rc1 has automated local coverage and extensive real-device validation on an R36H. Broader ArkOS/dArkOS hardware coverage is still welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
+> **Release candidate:** version 1.0.0-rc11 adds battery protection for moving, deleting and formatting. At 20% or below, these operations are blocked; if the battery reading is unavailable, the app warns but allows them. This behavior passed local checks but still needs validation on an R36H. Broader ArkOS/dArkOS hardware coverage is welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
 
 ## Features
 
@@ -17,6 +17,7 @@ Games stored physically on SD2 are bind-mounted back to their original `/roms/<s
 - Displays progressive scan feedback whenever a system game list is built or refreshed.
 - Transfers one or multiple files/directories with free-space checks, SHA-256 verification and rollback on failure.
 - Permanently deletes selected games from SD1 or SD2 after an explicit confirmation.
+- Blocks moving, deleting and formatting when the reported battery level is 20% or lower. If the level cannot be read, it warns the user but allows the operation.
 - Restores bind mounts automatically after boot using a manifest stored on SD2.
 - Supports safely switching between multiple SD2 cards using UUID-based local profiles.
 - Groups CUE tracks, M3U multidisc sets and matching PortMaster launcher/directories.
@@ -52,7 +53,7 @@ The following commands are expected on ArkOS/dArkOS:
 - `rsync` (recommended; `cp` is the fallback)
 - `dialog` or `whiptail` (recommended)
 - `oga_controls` (recommended for built-in gamepad input)
-- `parted` and `mkfs.exfat` from exfatprogs (required only to format SD2)
+- `parted` and `mkfs.exfat` from exfatprogs (required only to format SD2; the installer attempts to add missing packages on Debian)
 
 Administrative operations use `sudo` when the manager is not running as root.
 
@@ -61,7 +62,7 @@ Administrative operations use `sudo` when the manager is not running as root.
 The release contains two files:
 
 ```text
-ROM-Splitter-1.0.0-rc1.zip
+ROM-Splitter-1.0.0-rc11.zip
 Install ROM Splitter.sh
 ```
 
@@ -71,6 +72,8 @@ Install ROM Splitter.sh
 4. Wait for the success message.
 5. Refresh or restart EmulationStation again.
 6. Open `Tools > ROM Splitter`.
+
+On Debian, the installer attempts to install missing `parted` and/or `exfatprogs` packages through `apt-get`. If the handheld is offline or the package installation fails, ROM Splitter still installs; only the in-app SD2 formatting option remains unavailable until those tools are installed. The ZIP does not bundle a device-specific `.deb`.
 
 The package installer verifies the ZIP checksum before extraction and installs the application at:
 
