@@ -6,7 +6,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history and known limitations.
 
 Games stored physically on SD2 are bind-mounted back to their original `/roms/<system>/<game>` locations. If SD2 is absent, the console and games remaining on SD1 continue to work normally.
 
-> **Release candidate:** version 1.0.0-rc11 adds battery protection for moving, deleting and formatting. At 20% or below, these operations are blocked; if the battery reading is unavailable, the app warns but allows them. This behavior passed local checks but still needs validation on an R36H. Broader ArkOS/dArkOS hardware coverage is welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
+> **Release candidate:** version 1.0.0-rc14 lets the installer choose a local ROM Splitter ZIP for a rollback or reinstall. The application and battery protection worked on the R36H in rc12, and the rc13 installer ran successfully there. The new version-selection menu passed local checks and awaits real-device confirmation. Broader ArkOS/dArkOS hardware coverage is welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
 
 ## Features
 
@@ -17,7 +17,7 @@ Games stored physically on SD2 are bind-mounted back to their original `/roms/<s
 - Displays progressive scan feedback whenever a system game list is built or refreshed.
 - Transfers one or multiple files/directories with free-space checks, SHA-256 verification and rollback on failure.
 - Permanently deletes selected games from SD1 or SD2 after an explicit confirmation.
-- Blocks moving, deleting and formatting when the reported battery level is 20% or lower. If the level cannot be read, it warns the user but allows the operation.
+- Blocks moving, deleting and formatting when the battery sensor reports 22% or lower. This two-point safety margin covers the observed R36H discrepancy (19% in EmulationStation versus 21% from the kernel sensor); the intended user-facing limit remains 20%. If the level cannot be read, it warns but allows the operation. Diagnostics shows the sensor reading used.
 - Restores bind mounts automatically after boot using a manifest stored on SD2.
 - Supports safely switching between multiple SD2 cards using UUID-based local profiles.
 - Groups CUE tracks, M3U multidisc sets and matching PortMaster launcher/directories.
@@ -62,7 +62,7 @@ Administrative operations use `sudo` when the manager is not running as root.
 The release contains two files:
 
 ```text
-ROM-Splitter-1.0.0-rc11.zip
+ROM-Splitter-1.0.0-rc14.zip
 Install ROM Splitter.sh
 ```
 
@@ -72,6 +72,8 @@ Install ROM Splitter.sh
 4. Wait for the success message.
 5. Refresh or restart EmulationStation again.
 6. Open `Tools > ROM Splitter`.
+
+The one-file installer offers the bundled version or a ZIP selected from the same folder, allowing a rollback to a previous release. It shows installed and selected versions, asks before installation or same-version reinstallation, displays progress, and waits for acknowledgement on completion. If optional formatting tools cannot be installed (for example, while offline), it shows a notice and continues. On supported handhelds, its dialogs accept D-Pad/A/B controls. The bundled ZIP is checked against the installer's embedded checksum; a manually selected older ZIP receives a ZIP integrity check and a trust warning, so use only releases from a trusted source. Detailed output is saved to `/roms/tools/rom-splitter-install.log` when the installer is launched from that folder.
 
 On Debian, the installer attempts to install missing `parted` and/or `exfatprogs` packages through `apt-get`. If the handheld is offline or the package installation fails, ROM Splitter still installs; only the in-app SD2 formatting option remains unavailable until those tools are installed. The ZIP does not bundle a device-specific `.deb`.
 

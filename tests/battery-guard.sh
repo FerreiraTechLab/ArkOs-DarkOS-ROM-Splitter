@@ -30,6 +30,7 @@ assert_allowed() {
 
 assert_allowed 'no battery reading'
 [[ -n "$BATTERY_WARNING" ]]
+[[ "$BATTERY_READING_DETAIL" == unavailable ]]
 mkdir -p "$ROMS2_POWER_SUPPLY_ROOT/ac" "$ROMS2_POWER_SUPPLY_ROOT/BAT0"
 printf 'Mains\n' > "$ROMS2_POWER_SUPPLY_ROOT/ac/type"
 printf 'Battery\n' > "$ROMS2_POWER_SUPPLY_ROOT/BAT0/type"
@@ -37,9 +38,16 @@ printf '20\n' > "$ROMS2_POWER_SUPPLY_ROOT/BAT0/capacity"
 assert_blocked '20 percent'
 printf '19\n' > "$ROMS2_POWER_SUPPLY_ROOT/BAT0/capacity"
 assert_blocked '19 percent'
+[[ "$BATTERY_READING_DETAIL" == 'BAT0: 19%' ]]
 printf '21\n' > "$ROMS2_POWER_SUPPLY_ROOT/BAT0/capacity"
-assert_allowed '21 percent'
+assert_blocked '21 percent sensor reading (19 percent shown on R36H)'
+[[ "$BATTERY_READING_DETAIL" == 'BAT0: 21%' ]]
+printf '22\n' > "$ROMS2_POWER_SUPPLY_ROOT/BAT0/capacity"
+assert_blocked '22 percent margin boundary'
+printf '23\n' > "$ROMS2_POWER_SUPPLY_ROOT/BAT0/capacity"
+assert_allowed '23 percent'
 [[ -z "$BATTERY_WARNING" ]]
+[[ "$BATTERY_READING_DETAIL" == 'BAT0: 23%' ]]
 printf 'invalid\n' > "$ROMS2_POWER_SUPPLY_ROOT/BAT0/capacity"
 assert_allowed 'invalid reading'
 [[ -n "$BATTERY_WARNING" ]]

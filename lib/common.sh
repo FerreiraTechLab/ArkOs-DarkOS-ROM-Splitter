@@ -42,13 +42,17 @@ run_root() {
 
 BATTERY_BLOCK_REASON=""
 BATTERY_WARNING=""
+BATTERY_READING_DETAIL=""
+BATTERY_SENSOR_SAFETY_MARGIN=2
 
 battery_allows_heavy_operation() {
   BATTERY_BLOCK_REASON=""
   BATTERY_WARNING=""
+  BATTERY_READING_DETAIL=""
   [[ "${ROMS2_DEMO:-0}" != 1 ]] || return 0
 
   local supply type capacity found=0 unknown=0 root="${ROMS2_POWER_SUPPLY_ROOT:-/sys/class/power_supply}"
+  local -a readings=()
   for supply in "$root"/*; do
     [[ -d "$supply" ]] || continue
     [[ -r "$supply/type" ]] || continue
@@ -58,16 +62,22 @@ battery_allows_heavy_operation() {
     found=1
     if [[ ! -r "$supply/capacity" ]]; then
       unknown=1
+      readings+=("${supply##*/}: unavailable")
       continue
     fi
     capacity=""
     IFS= read -r capacity < "$supply/capacity" || true
     if [[ ! "$capacity" =~ ^[0-9]+$ ]] || ((10#$capacity > 100)); then
       unknown=1
+      readings+=("${supply##*/}: invalid")
       continue
     fi
-    if ((10#$capacity <= 20)); then
-      BATTERY_BLOCK_REASON="Battery is at $((10#$capacity))%. Charge above 20% before moving, deleting or formatting."
+    readings+=("${supply##*/}: $((10#$capacity))%")
+    # On tested R36H, EmulationStation displayed 19% while the kernel sensor
+    # still reported 21%. Keep a small margin around the displayed 20% limit.
+    if ((10#$capacity <= 20 + BATTERY_SENSOR_SAFETY_MARGIN)); then
+      BATTERY_READING_DETAIL="${readings[*]}"
+      BATTERY_BLOCK_REASON="Battery sensor reads $((10#$capacity))% (20% limit with a 2-point safety margin). Charge a little more before moving, deleting or formatting."
       return 1
     fi
   done
@@ -75,6 +85,7 @@ battery_allows_heavy_operation() {
   if ((found == 0 || unknown)); then
     BATTERY_WARNING="Battery level could not be verified. You can continue, but charge the console before moving, deleting or formatting."
   fi
+  BATTERY_READING_DETAIL="${readings[*]:-unavailable}"
   return 0
 }
 

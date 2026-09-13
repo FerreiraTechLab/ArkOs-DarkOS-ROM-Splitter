@@ -464,6 +464,10 @@ format_sd2_ui() {
 show_diagnostics() {
   ui_backend_quiet mount_sd2 || true
   local text=""
+  battery_allows_heavy_operation || true
+  text+="Battery: ${BATTERY_READING_DETAIL:-unavailable}\n"
+  [[ -z "$BATTERY_BLOCK_REASON" ]] || text+="Battery protection: active (sensor at 22% or less)\n"
+  [[ -z "$BATTERY_WARNING" ]] || text+="Battery protection: reading unavailable; warning only\n"
   text+="ROMS mount: $(findmnt -n -o SOURCE,FSTYPE "$ROMS_ROOT" 2>/dev/null || echo missing)\n"
   text+="ROMS2 mount: $(findmnt -n -o SOURCE,FSTYPE "$ROMS2_ROOT" 2>/dev/null || echo not-mounted)\n"
   text+="Configured SD2: $(sd2_info 2>>"$LOG_FILE")\n"

@@ -30,6 +30,7 @@ chmod +x "$STAGE_DIR"/*.sh "$STAGE_DIR/boot"/*.sh "$STAGE_DIR/lib"/*.sh
 cp "$BASE_DIR/packaging/Install ROM Splitter.sh" "$DIST_DIR/Install ROM Splitter.sh"
 PACKAGE_SHA256="$(sha256sum -- "$DIST_DIR/ROM-Splitter-$VERSION.zip" | awk '{print $1}')"
 sed -i "s/^EXPECTED_SHA256=.*/EXPECTED_SHA256=\"$PACKAGE_SHA256\"/" "$DIST_DIR/Install ROM Splitter.sh"
+sed -i "s/^BUNDLED_VERSION=.*/BUNDLED_VERSION=\"$VERSION\"/" "$DIST_DIR/Install ROM Splitter.sh"
 chmod +x "$DIST_DIR/Install ROM Splitter.sh"
 
 printf 'Release created:\n'
