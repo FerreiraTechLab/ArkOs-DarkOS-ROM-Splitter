@@ -78,4 +78,52 @@ prepare_files "$test_archive" > "$test_root/progress"
 [[ "$(<"$INSTALL_DIR/VERSION")" == "$test_version" ]]
 rg -q '^100$' "$test_root/progress"
 
+# uninstall_has_sd2_games only reports true while an active bind registry exists.
+rm -f "$INSTALL_DIR/state/active-binds.tsv"
+if uninstall_has_sd2_games; then
+  printf 'uninstall_has_sd2_games should be false with no active binds\n' >&2
+  exit 1
+fi
+mkdir -p "$INSTALL_DIR/state"
+printf 'card1\tpsx/game.zip\tfile\n' > "$INSTALL_DIR/state/active-binds.tsv"
+uninstall_has_sd2_games || { printf 'uninstall_has_sd2_games should be true with active binds\n' >&2; exit 1; }
+rm -f "$INSTALL_DIR/state/active-binds.tsv"
+
+# Cancelling the first uninstall confirmation removes nothing and leaves the
+# installed app in place.
+printf '' > "$test_root/events"
+MENU_CHOICE=uninstall
+ANSWER=no
+main
+rg -q 'PROMPT: Uninstall ROM Splitter' "$test_root/events"
+if rg -q '^STAGE:' "$test_root/events"; then
+  printf 'Cancelling uninstall unexpectedly started removal\n' >&2
+  exit 1
+fi
+[[ -f "$INSTALL_DIR/VERSION" ]]
+
+# Confirming uninstall runs both stages (deactivate SD2, then remove files)
+# and shows the completion message. run_stage is stubbed here, same as the
+# install assertions above, so this checks orchestration, not sudo-gated
+# file removal.
+printf '' > "$test_root/events"
+ANSWER=yes
+main
+[[ "$(rg -c '^STAGE:' "$test_root/events")" -eq 2 ]]
+rg -q 'MESSAGE: Uninstall complete' "$test_root/events"
+if rg -q 'PROMPT: SD2 games will disconnect' "$test_root/events"; then
+  printf 'Unexpected SD2 warning with no active binds\n' >&2
+  exit 1
+fi
+
+# When games are actively bound from SD2, uninstalling shows the extra warning.
+mkdir -p "$INSTALL_DIR/state"
+printf 'card1\tpsx/game.zip\tfile\n' > "$INSTALL_DIR/state/active-binds.tsv"
+printf '' > "$test_root/events"
+main
+rg -q 'PROMPT: Uninstall ROM Splitter' "$test_root/events"
+rg -q 'PROMPT: SD2 games will disconnect' "$test_root/events"
+[[ "$(rg -c '^STAGE:' "$test_root/events")" -eq 2 ]]
+rm -f "$INSTALL_DIR/state/active-binds.tsv"
+
 printf 'installer-flow-tests-ok\n'

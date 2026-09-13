@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROMS_DIR="${ROMS_ROOT:-/roms}"
 INSTALL_DIR="$ROMS_DIR/tools/.rom-splitter"
+UNINSTALL_SENTINEL='__UNINSTALL__'
 EXPECTED_SHA256=""
 BUNDLED_VERSION=""
 UI_BIN=""
@@ -209,7 +210,9 @@ choose_archive() {
   local bundled="$1" installed="$2" choice selected
   local -a options=()
   [[ -z "$bundled" ]] || options+=(update "Install bundled v$BUNDLED_VERSION")
-  options+=(choose 'Choose another ZIP (rollback)' exit 'Exit installer')
+  options+=(choose 'Choose another ZIP (rollback)')
+  [[ "$installed" == 'not installed' ]] || options+=(uninstall 'Uninstall ROM Splitter')
+  options+=(exit 'Exit installer')
   while true; do
     choice="$(ui_menu 'ROM Splitter installer' \
       "Installed: $installed\\nChoose an installation option.\\nA: Confirm | B: Exit" \
@@ -221,6 +224,7 @@ choose_archive() {
         printf '%s\n' "$selected"
         return 0
         ;;
+      uninstall) printf '%s\n' "$UNINSTALL_SENTINEL"; return 0 ;;
       exit) return 1 ;;
     esac
   done
@@ -263,6 +267,75 @@ finish_installation() {
   progress 20 'Creating Tools launchers...'
   ROM_SPLITTER_SKIP_OPTIONAL_DEPS=1 "$INSTALL_DIR/install.sh" >>"$LOG_FILE" 2>&1 || return 1
   progress 100 'ROM Splitter installed.'
+}
+
+# True when the installed app currently has games bind-mounted from SD2, so
+# the caller can warn before that link is dropped.
+uninstall_has_sd2_games() {
+  [[ -f "$INSTALL_DIR/lib/common.sh" && -f "$INSTALL_DIR/lib/games.sh" ]] || return 1
+  (
+    export ROMS2_BASE_DIR="$INSTALL_DIR"
+    source "$INSTALL_DIR/lib/common.sh"
+    source "$INSTALL_DIR/lib/games.sh"
+    [[ -s "$(active_binds_file)" ]]
+  )
+}
+
+# Reuse the app's own safe-eject routine so SD2 games are cleanly detached
+# (never deleted) before the app that restores them on boot is removed.
+deactivate_before_uninstall() {
+  progress 10 'Checking for active SD2 game links...'
+  if [[ -f "$INSTALL_DIR/lib/common.sh" ]]; then
+    (
+      export ROMS2_BASE_DIR="$INSTALL_DIR"
+      export ROMS_ROOT="$ROMS_DIR"
+      source "$INSTALL_DIR/lib/common.sh"
+      source "$INSTALL_DIR/lib/devices.sh"
+      source "$INSTALL_DIR/lib/games.sh"
+      source "$INSTALL_DIR/lib/mount.sh"
+      ensure_runtime_dirs
+      if findmnt -rn "$ROMS2_ROOT" >/dev/null 2>&1 || [[ -n "$(active_card_id || true)" ]]; then
+        unmount_sd2
+      fi
+    ) >>"$LOG_FILE" 2>&1 || return 1
+  fi
+  progress 100 'SD2 game links are safe.'
+}
+
+# Removes only what the installer itself created: launchers, boot service and
+# the private app copy. ROM/game files on SD1 and SD2 are never touched here.
+remove_installed_files() {
+  progress 15 'Disabling boot service...'
+  sudo systemctl disable --now roms2-manager.service >>"$LOG_FILE" 2>&1 || true
+  sudo rm -f /etc/systemd/system/roms2-manager.service >>"$LOG_FILE" 2>&1 || true
+  sudo systemctl daemon-reload >>"$LOG_FILE" 2>&1 || true
+  progress 45 'Removing Tools launchers...'
+  sudo rm -f "/opt/system/Tools/ROM Splitter.sh" "$ROMS_DIR/tools/ROM Splitter.sh" >>"$LOG_FILE" 2>&1 || true
+  progress 70 'Removing installed application files...'
+  sudo rm -rf -- "$INSTALL_DIR" >>"$LOG_FILE" 2>&1 || return 1
+  progress 100 'ROM Splitter removed.'
+}
+
+run_uninstall() {
+  local installed="$1"
+  ui_yesno 'Uninstall ROM Splitter' \
+    "Installed: $installed\n\nRemoves the Tools launchers, the boot service and the app files at:\n$INSTALL_DIR\n\nAll ROM/game files on SD1 and SD2 stay untouched.\n\nContinue?\n\nA: Yes | B: Cancel" || return 0
+
+  if uninstall_has_sd2_games; then
+    ui_yesno 'SD2 games will disconnect' \
+      "Games currently stored on SD2 will stop appearing in EmulationStation until ROM Splitter is reinstalled. No file on SD2 is deleted.\n\nUninstall now?\n\nA: Yes | B: Cancel" || return 0
+  fi
+
+  if ! run_stage 'Uninstalling ROM Splitter' 'Deactivating SD2 game links...' deactivate_before_uninstall; then
+    ui_msg 'Uninstall failed' "SD2 could not be safely deactivated. Nothing was removed. Check the installation log: $LOG_FILE"
+    return 1
+  fi
+  if ! run_stage 'Uninstalling ROM Splitter' 'Removing launchers, service and app files...' remove_installed_files; then
+    ui_msg 'Uninstall failed' "Could not finish removing ROM Splitter. Check the installation log: $LOG_FILE"
+    return 1
+  fi
+  ui_msg 'Uninstall complete' \
+    "ROM Splitter was removed.\n\nAll ROM/game files on SD1 and SD2 were kept.\n\nRefresh or restart EmulationStation to update the Tools menu.\n\nA: OK"
 }
 
 run_stage() {
@@ -314,6 +387,10 @@ main() {
     installed_version="$(tr -d '[:space:]' < "$INSTALL_DIR/VERSION")"
   fi
   archive="$(choose_archive "$bundled" "$installed_version")" || return 0
+  if [[ "$archive" == "$UNINSTALL_SENTINEL" ]]; then
+    run_uninstall "$installed_version"
+    return $?
+  fi
   package_version="$(package_version_of "$archive" || true)"
   if [[ -z "$package_version" ]] || ! unzip -tq "$archive" >>"$LOG_FILE" 2>&1; then
     ui_msg 'Invalid package' 'The selected ZIP is incomplete or its version does not match its filename.'
