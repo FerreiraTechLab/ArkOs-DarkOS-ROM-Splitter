@@ -126,4 +126,27 @@ rg -q 'PROMPT: SD2 games will disconnect' "$test_root/events"
 [[ "$(rg -c '^STAGE:' "$test_root/events")" -eq 2 ]]
 rm -f "$INSTALL_DIR/state/active-binds.tsv"
 
+# Uninstall remains available when the folder contains no release ZIPs.
+empty_packages="$test_root/no-zips"
+mkdir -p "$empty_packages"
+SCRIPT_DIR="$empty_packages"
+printf '' > "$test_root/events"
+main
+rg -q 'PROMPT: Uninstall ROM Splitter' "$test_root/events"
+[[ "$(rg -c '^STAGE:' "$test_root/events")" -eq 2 ]]
+SCRIPT_DIR="$repo_dir/dist"
+
+# The removal backend deletes the private app copy while leaving an unrelated
+# ROM file untouched. sudo/systemctl are stubbed to keep this test unprivileged.
+unrelated_rom="$ROMS_DIR/psx/Keep Me.chd"
+mkdir -p "$(dirname "$unrelated_rom")" "$INSTALL_DIR"
+printf game > "$unrelated_rom"
+printf app > "$INSTALL_DIR/test-file"
+sudo() { "$@"; }
+systemctl() { :; }
+LOG_FILE="$test_root/remove.log"
+remove_installed_files > "$test_root/remove-progress"
+[[ ! -e "$INSTALL_DIR" ]]
+[[ "$(<"$unrelated_rom")" == game ]]
+
 printf 'installer-flow-tests-ok\n'

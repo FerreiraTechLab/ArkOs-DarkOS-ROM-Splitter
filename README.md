@@ -6,7 +6,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history and known limitations.
 
 Games stored physically on SD2 are bind-mounted back to their original `/roms/<system>/<game>` locations. If SD2 is absent, the console and games remaining on SD1 continue to work normally.
 
-> **Release candidate:** version 1.0.0-rc15 adds an `Uninstall ROM Splitter` option to the standalone installer. It safely disconnects any SD2 game links first, then removes only the launchers, boot service and installed app copy. ROM/game files on SD1 and SD2 are never deleted. The application and battery protection worked on the R36H in rc12, and the rc13 installer ran successfully there; rc14's version-selection menu passed local checks. The new uninstall flow passed local checks and awaits real-device confirmation. Broader ArkOS/dArkOS hardware coverage is welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
+> **Release candidate:** version 1.0.0-rc16 completes the installer's uninstall flow. Uninstall remains available without local ZIPs, safely disconnects SD2 game links while leaving the card mounted, and removes the installed application without deleting ROM/game files. These changes passed local checks and await real-device confirmation. Broader ArkOS/dArkOS hardware coverage is welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
 
 ## Features
 
@@ -62,7 +62,7 @@ Administrative operations use `sudo` when the manager is not running as root.
 The release contains two files:
 
 ```text
-ROM-Splitter-1.0.0-rc15.zip
+ROM-Splitter-1.0.0-rc16.zip
 Install ROM Splitter.sh
 ```
 
@@ -260,13 +260,7 @@ Copy the new ZIP and its matching `Install ROM Splitter.sh` into `/roms/tools`, 
 
 ## Uninstall
 
-Run:
-
-```bash
-/roms/tools/.rom-splitter/uninstall.sh
-```
-
-This removes both launchers and the boot service. It does not delete games, the SD2 manifest, or data from either card. The hidden application directory may be removed manually after uninstalling if its logs and configuration are no longer needed.
+Run `Install ROM Splitter.sh`, choose `Uninstall ROM Splitter`, and confirm. This option remains available even if no release ZIP is beside the installer. It safely disconnects active SD2 game links, removes both launchers, the boot service, and the hidden application directory (including its local settings and logs). It never deletes ROM/game files or the manifest stored on SD2. Games physically stored on SD2 stop appearing under `/roms` until ROM Splitter is installed again and its links are rebuilt.
 
 ## Demo mode
 

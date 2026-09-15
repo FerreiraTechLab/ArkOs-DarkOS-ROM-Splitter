@@ -210,7 +210,7 @@ choose_archive() {
   local bundled="$1" installed="$2" choice selected
   local -a options=()
   [[ -z "$bundled" ]] || options+=(update "Install bundled v$BUNDLED_VERSION")
-  options+=(choose 'Choose another ZIP (rollback)')
+  [[ -z "$(list_local_packages)" ]] || options+=(choose 'Choose another ZIP (rollback)')
   [[ "$installed" == 'not installed' ]] || options+=(uninstall 'Uninstall ROM Splitter')
   options+=(exit 'Exit installer')
   while true; do
@@ -281,8 +281,9 @@ uninstall_has_sd2_games() {
   )
 }
 
-# Reuse the app's own safe-eject routine so SD2 games are cleanly detached
-# (never deleted) before the app that restores them on boot is removed.
+# Reuse the app's bind registry so SD2 games are cleanly detached (never
+# deleted) before the app that restores them on boot is removed. Keep the SD2
+# itself mounted; only the game paths exposed under /roms are disconnected.
 deactivate_before_uninstall() {
   progress 10 'Checking for active SD2 game links...'
   if [[ -f "$INSTALL_DIR/lib/common.sh" ]]; then
@@ -294,9 +295,7 @@ deactivate_before_uninstall() {
       source "$INSTALL_DIR/lib/games.sh"
       source "$INSTALL_DIR/lib/mount.sh"
       ensure_runtime_dirs
-      if findmnt -rn "$ROMS2_ROOT" >/dev/null 2>&1 || [[ -n "$(active_card_id || true)" ]]; then
-        unmount_sd2
-      fi
+      deactivate_recorded_binds
     ) >>"$LOG_FILE" 2>&1 || return 1
   fi
   progress 100 'SD2 game links are safe.'
@@ -307,10 +306,10 @@ deactivate_before_uninstall() {
 remove_installed_files() {
   progress 15 'Disabling boot service...'
   sudo systemctl disable --now roms2-manager.service >>"$LOG_FILE" 2>&1 || true
-  sudo rm -f /etc/systemd/system/roms2-manager.service >>"$LOG_FILE" 2>&1 || true
-  sudo systemctl daemon-reload >>"$LOG_FILE" 2>&1 || true
+  sudo rm -f /etc/systemd/system/roms2-manager.service >>"$LOG_FILE" 2>&1 || return 1
+  sudo systemctl daemon-reload >>"$LOG_FILE" 2>&1 || return 1
   progress 45 'Removing Tools launchers...'
-  sudo rm -f "/opt/system/Tools/ROM Splitter.sh" "$ROMS_DIR/tools/ROM Splitter.sh" >>"$LOG_FILE" 2>&1 || true
+  sudo rm -f "/opt/system/Tools/ROM Splitter.sh" "$ROMS_DIR/tools/ROM Splitter.sh" >>"$LOG_FILE" 2>&1 || return 1
   progress 70 'Removing installed application files...'
   sudo rm -rf -- "$INSTALL_DIR" >>"$LOG_FILE" 2>&1 || return 1
   progress 100 'ROM Splitter removed.'
@@ -371,20 +370,21 @@ main() {
     ui_msg 'Installation error' 'The unzip command is required to install ROM Splitter.'
     return 1
   fi
-  if [[ -z "$(list_local_packages)" ]]; then
-    ui_msg 'Package not found' 'Copy at least one ROM Splitter ZIP next to this installer and try again.'
-    return 1
-  fi
-  bundled="$(find_package)" || package_rc=$?
-  if ((package_rc == 2)); then
-    ui_msg 'Installation error' 'The sha256sum command is required to verify the bundled package.'
-    return 1
-  fi
-  if [[ -n "$bundled" ]]; then
-    BUNDLED_VERSION="$(package_version_of "$bundled" || true)"
-  fi
   if [[ -r "$INSTALL_DIR/VERSION" ]]; then
     installed_version="$(tr -d '[:space:]' < "$INSTALL_DIR/VERSION")"
+  fi
+  if [[ -n "$(list_local_packages)" ]]; then
+    bundled="$(find_package)" || package_rc=$?
+    if ((package_rc == 2)); then
+      ui_msg 'Installation error' 'The sha256sum command is required to verify the bundled package.'
+      return 1
+    fi
+    if [[ -n "$bundled" ]]; then
+      BUNDLED_VERSION="$(package_version_of "$bundled" || true)"
+    fi
+  elif [[ "$installed_version" == 'not installed' ]]; then
+    ui_msg 'Package not found' 'Copy at least one ROM Splitter ZIP next to this installer and try again.'
+    return 1
   fi
   archive="$(choose_archive "$bundled" "$installed_version")" || return 0
   if [[ "$archive" == "$UNINSTALL_SENTINEL" ]]; then
