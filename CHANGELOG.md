@@ -12,6 +12,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Improved handling and resolution of duplicate games across SD1 and SD2.
 - Optional automatic discovery of new SD2 games during startup.
 
+## [1.0.0-rc19] - 2026-09-21
+
+### Fixed
+
+- Make `emulationstation.service` wait for the ROM Splitter boot restoration service before scanning ports. This avoids a stale game count after reboot while keeping startup possible when SD2 is absent.
+- Remove the EmulationStation ordering drop-in when ROM Splitter is uninstalled.
+
+The R36H confirmed that all 30 SD2 port launchers were mounted after boot while EmulationStation showed only 42 of 55 launchers until restarted. The new boot ordering passed local tests and awaits a reboot test on the handheld.
+
 ## [1.0.0-rc18] - 2026-09-21
 
 Install directly over the last public candidate, **rc15**. rc16 and rc17 were not published; their changes are included here. No intermediate installation or uninstall is required.

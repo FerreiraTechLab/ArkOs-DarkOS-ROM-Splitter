@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROMS_DIR="${ROMS_ROOT:-/roms}"
 INSTALL_DIR="$ROMS_DIR/tools/.rom-splitter"
+SYSTEMD_DIR="${ROMS2_SYSTEMD_DIR:-/etc/systemd/system}"
 UNINSTALL_SENTINEL='__UNINSTALL__'
 EXPECTED_SHA256=""
 BUNDLED_VERSION=""
@@ -348,7 +349,8 @@ deactivate_before_uninstall() {
 remove_installed_files() {
   progress 15 'Disabling boot service...'
   sudo systemctl disable --now roms2-manager.service >>"$LOG_FILE" 2>&1 || true
-  sudo rm -f /etc/systemd/system/roms2-manager.service >>"$LOG_FILE" 2>&1 || return 1
+  sudo rm -f "$SYSTEMD_DIR/roms2-manager.service" \
+    "$SYSTEMD_DIR/emulationstation.service.d/rom-splitter.conf" >>"$LOG_FILE" 2>&1 || return 1
   sudo systemctl daemon-reload >>"$LOG_FILE" 2>&1 || return 1
   progress 45 'Removing Tools launchers...'
   sudo rm -f "/opt/system/Tools/ROM Splitter.sh" "$ROMS_DIR/tools/ROM Splitter.sh" >>"$LOG_FILE" 2>&1 || return 1

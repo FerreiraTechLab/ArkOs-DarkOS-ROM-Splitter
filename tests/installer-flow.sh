@@ -10,6 +10,7 @@ trap 'cleanup; rm -rf -- "$test_root"' EXIT
 SCRIPT_DIR="$repo_dir/dist"
 ROMS_DIR="$test_root/roms"
 INSTALL_DIR="$ROMS_DIR/tools/.rom-splitter"
+SYSTEMD_DIR="$test_root/systemd"
 PERSISTENT_STATE_DIR="$ROMS_DIR/tools/.rom-splitter-state"
 ROM_SPLITTER_INSTALL_LOG="$test_root/install.log"
 test_archive="$(find "$SCRIPT_DIR" -maxdepth 1 -type f -name 'ROM-Splitter-*.zip' | sort -V | tail -n1)"
@@ -62,7 +63,7 @@ old_version="$(package_version_of "$old_archive")"
 printf '' > "$test_root/events"
 ANSWER=yes
 MENU_CHOICE=choose
-ZIP_CHOICE=2
+ZIP_CHOICE=3
 main
 rg -q "Selected: $old_version" "$test_root/events"
 rg -q 'MESSAGE: ZIP verification' "$test_root/events"
@@ -148,6 +149,9 @@ unrelated_rom="$ROMS_DIR/psx/Keep Me.chd"
 mkdir -p "$(dirname "$unrelated_rom")" "$INSTALL_DIR"
 printf game > "$unrelated_rom"
 printf app > "$INSTALL_DIR/test-file"
+mkdir -p "$SYSTEMD_DIR/emulationstation.service.d"
+printf unit > "$SYSTEMD_DIR/roms2-manager.service"
+printf order > "$SYSTEMD_DIR/emulationstation.service.d/rom-splitter.conf"
 mkdir -p "$PERSISTENT_STATE_DIR"
 printf state > "$PERSISTENT_STATE_DIR/keep-state"
 sudo() { "$@"; }
@@ -157,5 +161,7 @@ remove_installed_files > "$test_root/remove-progress"
 [[ ! -e "$INSTALL_DIR" ]]
 [[ "$(<"$unrelated_rom")" == game ]]
 [[ "$(<"$PERSISTENT_STATE_DIR/keep-state")" == state ]]
+[[ ! -e "$SYSTEMD_DIR/roms2-manager.service" ]]
+[[ ! -e "$SYSTEMD_DIR/emulationstation.service.d/rom-splitter.conf" ]]
 
 printf 'installer-flow-tests-ok\n'

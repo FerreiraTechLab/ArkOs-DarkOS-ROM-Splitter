@@ -6,7 +6,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history and known limitations.
 
 Games stored physically on SD2 are bind-mounted back to their original `/roms/<system>/<game>` locations. If SD2 is absent, the console and games remaining on SD1 continue to work normally.
 
-> **Release candidate:** version 1.0.0-rc18 can be installed directly over the last public release, rc15; rc16 and rc17 were not published. rc18 opened and restored SD2 games on an R36H. A direct rc15-to-rc18 upgrade passed local tests and awaits real-device confirmation. Broader ArkOS/dArkOS hardware coverage is welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
+> **Release candidate:** version 1.0.0-rc19 makes EmulationStation wait for SD2 link restoration before scanning ports. rc18 opened and restored SD2 games on an R36H; the new boot ordering awaits a reboot test. A direct upgrade from rc15 passed local tests. Broader ArkOS/dArkOS hardware coverage is welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
 
 ## Features
 
@@ -62,7 +62,7 @@ Administrative operations use `sudo` when the manager is not running as root.
 The release contains two files:
 
 ```text
-ROM-Splitter-1.0.0-rc18.zip
+ROM-Splitter-1.0.0-rc19.zip
 Install ROM Splitter.sh
 ```
 

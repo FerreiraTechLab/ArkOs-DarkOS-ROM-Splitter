@@ -20,8 +20,8 @@ printf 'card-a\n' > "$INSTALL_DIR/state/active-card"
 printf 'psx/game.chd\tfile\n' > "$INSTALL_DIR/state/cards/card-a.manifest.tsv"
 printf 'ROMS2_UUID=card-a\n' > "$INSTALL_DIR/config/roms2.conf"
 
-prepare_files "$repo_dir/dist/ROM-Splitter-1.0.0-rc18.zip" > "$test_root/progress"
-[[ "$(<"$INSTALL_DIR/VERSION")" == '1.0.0-rc18' ]]
+prepare_files "$repo_dir/dist/ROM-Splitter-1.0.0-rc19.zip" > "$test_root/progress"
+[[ "$(<"$INSTALL_DIR/VERSION")" == '1.0.0-rc19' ]]
 [[ "$(<"$INSTALL_DIR/config/roms2.conf")" == 'ROMS2_UUID=card-a' ]]
 [[ -f "$ROMS_DIR/tools/.rom-splitter-state/active-binds.tsv" ]]
 cmp "$INSTALL_DIR/state/active-binds.tsv" "$ROMS_DIR/tools/.rom-splitter-state/active-binds.tsv"
