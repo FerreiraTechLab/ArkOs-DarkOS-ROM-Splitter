@@ -6,7 +6,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history and known limitations.
 
 Games stored physically on SD2 are bind-mounted back to their original `/roms/<system>/<game>` locations. If SD2 is absent, the console and games remaining on SD1 continue to work normally.
 
-> **Release candidate:** version 1.0.0-rc16 completes the installer's uninstall flow. Uninstall remains available without local ZIPs, safely disconnects SD2 game links while leaving the card mounted, and removes the installed application without deleting ROM/game files. These changes passed local checks and await real-device confirmation. Broader ArkOS/dArkOS hardware coverage is welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
+> **Release candidate:** version 1.0.0-rc18 can be installed directly over the last public release, rc15; rc16 and rc17 were not published. rc18 opened and restored SD2 games on an R36H. A direct rc15-to-rc18 upgrade passed local tests and awaits real-device confirmation. Broader ArkOS/dArkOS hardware coverage is welcome. Formatting permanently erases the selected device, so verify the selected card carefully.
 
 ## Features
 
@@ -62,7 +62,7 @@ Administrative operations use `sudo` when the manager is not running as root.
 The release contains two files:
 
 ```text
-ROM-Splitter-1.0.0-rc16.zip
+ROM-Splitter-1.0.0-rc18.zip
 Install ROM Splitter.sh
 ```
 
@@ -75,7 +75,11 @@ Install ROM Splitter.sh
 
 The one-file installer offers the bundled version or a ZIP selected from the same folder, allowing a rollback to a previous release. It shows installed and selected versions, asks before installation or same-version reinstallation, displays progress, and waits for acknowledgement on completion. If optional formatting tools cannot be installed (for example, while offline), it shows a notice and continues. On supported handhelds, its dialogs accept D-Pad/A/B controls. The bundled ZIP is checked against the installer's embedded checksum; a manually selected older ZIP receives a ZIP integrity check and a trust warning, so use only releases from a trusted source. Detailed output is saved to `/roms/tools/rom-splitter-install.log` when the installer is launched from that folder.
 
+If rc17 exits before showing its menu on an exFAT SD1, install rc18 using its matching ZIP and installer; uninstalling rc17 first is unnecessary.
+
 When ROM Splitter is already installed, the same installer also offers `Uninstall ROM Splitter`. It first safely disconnects any games currently bind-mounted from SD2 (the same routine used by `Unmount SD2` in the app, with an extra confirmation when games are actively bound), then removes only the Tools launchers, the boot service and the installed application copy. It never deletes ROM/game files on SD1 or SD2, and never formats SD2; the confirmation dialogs state this explicitly. Because the boot restoration service is removed, games stored on SD2 stop appearing in EmulationStation after the next reboot until ROM Splitter is reinstalled. The files themselves stay untouched on the card.
+
+The bind registry and card profiles are kept separately at `/roms/tools/.rom-splitter-state`, so replacing or uninstalling the application does not erase that state. Existing state is copied from the old application directory on first run. When switching to or from a pre-rc17 release, the installer copies state between the old and new locations; it does not require symbolic links, which exFAT cannot provide.
 
 On Debian, the installer attempts to install missing `parted` and/or `exfatprogs` packages through `apt-get`. If the handheld is offline or the package installation fails, ROM Splitter still installs; only the in-app SD2 formatting option remains unavailable until those tools are installed. The ZIP does not bundle a device-specific `.deb`.
 
@@ -226,6 +230,8 @@ New items are added to the SD2 manifest and bind-mounted at their matching `/rom
 Use `Diagnostics` to inspect SD1, SD2, the configured card, manifest entry count and controller backend.
 
 Use `Repair/rebuild bind mounts` when files exist on SD2 but are not visible under `/roms`. The boot restoration script can also be run manually:
+
+If the registry was lost but empty placeholders remain under `/roms`, Repair offers to back them up under `/roms/tools/.rom-splitter-recovery.*` before rebuilding links. It never moves non-empty SD1 files or folders automatically; these remain conflicts for manual review. Keep a recovery backup until games have been tested.
 
 ```bash
 sudo /roms/tools/.rom-splitter/boot/roms2-mount.sh

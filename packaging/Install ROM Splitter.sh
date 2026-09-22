@@ -230,6 +230,42 @@ choose_archive() {
   done
 }
 
+uses_external_state() {
+  local version="$1" candidate
+  if [[ "$version" =~ ^1\.0\.0-rc([0-9]+)$ ]]; then
+    candidate="${BASH_REMATCH[1]}"
+    ((10#$candidate >= 17))
+  elif [[ "$version" == 'not installed' || "$version" == 0.* ]]; then
+    return 1
+  else
+    return 0
+  fi
+}
+
+copy_state_for_version_change() {
+  local selected="$1" installed="$2" source_dir="" target_dir="" staged previous=""
+  local legacy="$INSTALL_DIR/state" persistent="$ROMS_DIR/tools/.rom-splitter-state"
+  if uses_external_state "$installed" && ! uses_external_state "$selected"; then
+    source_dir="$persistent"; target_dir="$legacy"
+  elif ! uses_external_state "$installed" && uses_external_state "$selected"; then
+    source_dir="$legacy"; target_dir="$persistent"
+  else
+    return 0
+  fi
+  [[ -d "$source_dir" ]] || return 0
+  staged="$(mktemp -d "$ROMS_DIR/tools/.rom-splitter-state-copy.XXXXXX")" || return 1
+  cp -R -- "$source_dir/." "$staged/" >>"$LOG_FILE" 2>&1 || return 1
+  if [[ -e "$target_dir" || -L "$target_dir" ]]; then
+    previous="$(mktemp -d "$ROMS_DIR/tools/.rom-splitter-state-previous.XXXXXX")" || return 1
+    mv -- "$target_dir" "$previous/state" >>"$LOG_FILE" 2>&1 || return 1
+  fi
+  if ! mv -- "$staged" "$target_dir" >>"$LOG_FILE" 2>&1; then
+    [[ -z "$previous" ]] || mv -- "$previous/state" "$target_dir" >>"$LOG_FILE" 2>&1 || true
+    return 1
+  fi
+  printf 'State copied for version change: %s -> %s\n' "$source_dir" "$target_dir" >>"$LOG_FILE"
+}
+
 prepare_files() {
   local archive="$1"
   progress 5 'Preparing application files...'
@@ -237,6 +273,12 @@ prepare_files() {
   if [[ ! -w "$INSTALL_DIR" ]]; then
     sudo chown "$(id -u):$(id -g)" "$INSTALL_DIR" >>"$LOG_FILE" 2>&1 || return 1
   fi
+  local selected_version installed_version='not installed'
+  selected_version="$(unzip -p "$archive" VERSION | tr -d '[:space:]')" || return 1
+  if [[ -f "$INSTALL_DIR/VERSION" ]]; then
+    installed_version="$(tr -d '[:space:]' < "$INSTALL_DIR/VERSION")"
+  fi
+  copy_state_for_version_change "$selected_version" "$installed_version" || return 1
   if [[ -f "$INSTALL_DIR/config/roms2.conf" ]]; then
     cp -- "$INSTALL_DIR/config/roms2.conf" "$WORK_DIR/roms2.conf" >>"$LOG_FILE" 2>&1 || return 1
   fi

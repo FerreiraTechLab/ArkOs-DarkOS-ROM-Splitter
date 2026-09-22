@@ -174,15 +174,58 @@ bind_item() {
     fi
   fi
 
+  # Record ownership before creating a placeholder. A power interruption
+  # cannot leave a newly created target without a registry entry.
+  active_bind_add "$card_id" "$rel" "$kind"
   if [[ -d "$source" ]]; then
     [[ -d "$target" ]] || { rm -f -- "$target" 2>/dev/null || true; mkdir -p "$target"; }
   else
     [[ -e "$target" ]] || : > "$target"
   fi
 
-  run_root mount --bind "$source" "$target"
-  active_bind_add "$card_id" "$rel" "$kind"
+  run_root mount --bind "$source" "$target" || { fail "Bind mount failed: $rel"; return 1; }
   log "Bind mounted $source -> $target"
+}
+
+orphan_placeholder_candidates() {
+  local manifest="$ROMS2_ROOT/.roms2-manifest.tsv" rel kind src dst
+  [[ -f "$manifest" ]] || return 0
+  while IFS=$'\t' read -r rel kind; do
+    [[ -n "$rel" && "$rel" != \#* ]] || continue
+    validate_manifest_rel "$rel" || continue
+    [[ "$kind" == file || "$kind" == dir ]] || continue
+    src="$ROMS2_ROOT/$rel"; dst="$ROMS_ROOT/$rel"
+    [[ -e "$src" ]] || continue
+    mountpoint -q "$dst" 2>/dev/null && continue
+    active_bind_contains "$rel" && continue
+    safe_managed_placeholder "$dst" "$kind" && printf '%s\0' "$rel"
+  done < "$manifest"
+}
+
+recover_orphan_placeholders() {
+  local backup_dir="$1" rel target
+  local -a candidates=()
+  mapfile -d '' -t candidates < <(orphan_placeholder_candidates)
+  ((${#candidates[@]})) || return 0
+  mkdir -p "$backup_dir"
+  for rel in "${candidates[@]}"; do
+    target="$ROMS_ROOT/$rel"
+    # Recheck immediately before moving, and never touch a live bind or data.
+    [[ -e "$ROMS2_ROOT/$rel" ]] || continue
+    active_bind_contains "$rel" && continue
+    mountpoint -q "$target" 2>/dev/null && continue
+    if [[ -f "$target" && ! -L "$target" ]]; then
+      safe_managed_placeholder "$target" file || continue
+    elif [[ -d "$target" && ! -L "$target" ]]; then
+      safe_managed_placeholder "$target" dir || continue
+    else
+      continue
+    fi
+    mkdir -p "$(dirname "$backup_dir/$rel")"
+    [[ ! -e "$backup_dir/$rel" ]] || { fail "Recovery backup already contains: $rel"; return 1; }
+    mv -- "$target" "$backup_dir/$rel"
+    log "Backed up orphan placeholder: $rel to $backup_dir"
+  done
 }
 
 rebuild_binds() {

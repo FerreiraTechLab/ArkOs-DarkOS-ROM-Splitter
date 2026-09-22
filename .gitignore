@@ -12,7 +12,6 @@ build/
 develop-eggs/
 dist/
 downloads/
-CHANGELOG.md
 eggs/
 .eggs/
 lib64/

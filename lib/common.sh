@@ -5,7 +5,11 @@ ROMS_ROOT="${ROMS_ROOT:-/roms}"
 ROMS2_ROOT="${ROMS2_ROOT:-/roms2}"
 CONFIG_DIR="${ROMS2_BASE_DIR}/config"
 LOG_DIR="${ROMS2_BASE_DIR}/logs"
-STATE_DIR="${ROMS2_BASE_DIR}/state"
+LEGACY_STATE_DIR="${ROMS2_BASE_DIR}/state"
+case "$ROMS2_BASE_DIR" in
+  */tools/.rom-splitter) STATE_DIR="${ROMS2_STATE_DIR:-${ROMS2_BASE_DIR%/.rom-splitter}/.rom-splitter-state}" ;;
+  *) STATE_DIR="${ROMS2_STATE_DIR:-$LEGACY_STATE_DIR}" ;;
+esac
 CONFIG_FILE="$CONFIG_DIR/roms2.conf"
 LOG_FILE="$LOG_DIR/roms2-manager.log"
 
@@ -26,6 +30,12 @@ fail() {
 
 ensure_runtime_dirs() {
   mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$STATE_DIR" "$ROMS2_ROOT"
+  if [[ "$STATE_DIR" != "$LEGACY_STATE_DIR" && -d "$LEGACY_STATE_DIR" && ! -L "$LEGACY_STATE_DIR" && ! -e "$STATE_DIR/.legacy-state-migrated" ]]; then
+    # Both paths are usually on exFAT: never require symlinks or preservation
+    # of Unix ownership/modes here.
+    cp -Rn -- "$LEGACY_STATE_DIR/." "$STATE_DIR/"
+    : > "$STATE_DIR/.legacy-state-migrated"
+  fi
 }
 
 require_root_or_sudo() {

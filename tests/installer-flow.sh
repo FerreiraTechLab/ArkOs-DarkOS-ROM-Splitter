@@ -10,6 +10,7 @@ trap 'cleanup; rm -rf -- "$test_root"' EXIT
 SCRIPT_DIR="$repo_dir/dist"
 ROMS_DIR="$test_root/roms"
 INSTALL_DIR="$ROMS_DIR/tools/.rom-splitter"
+PERSISTENT_STATE_DIR="$ROMS_DIR/tools/.rom-splitter-state"
 ROM_SPLITTER_INSTALL_LOG="$test_root/install.log"
 test_archive="$(find "$SCRIPT_DIR" -maxdepth 1 -type f -name 'ROM-Splitter-*.zip' | sort -V | tail -n1)"
 test_version="$(unzip -p "$test_archive" VERSION | tr -d '[:space:]')"
@@ -56,12 +57,12 @@ if rg -q '^STAGE:' "$test_root/events"; then
 fi
 
 # Choosing an older local ZIP offers rollback instead of forcing the bundled ZIP.
-old_archive="$(list_local_packages | sed -n '2p')"
+old_archive="$SCRIPT_DIR/ROM-Splitter-1.0.0-rc16.zip"
 old_version="$(package_version_of "$old_archive")"
 printf '' > "$test_root/events"
 ANSWER=yes
 MENU_CHOICE=choose
-ZIP_CHOICE=1
+ZIP_CHOICE=2
 main
 rg -q "Selected: $old_version" "$test_root/events"
 rg -q 'MESSAGE: ZIP verification' "$test_root/events"
@@ -69,25 +70,30 @@ rg -q 'MESSAGE: ZIP verification' "$test_root/events"
 
 mkdir -p "$INSTALL_DIR/config"
 printf 'KEEP_MY_CONFIG=1\n' > "$INSTALL_DIR/config/roms2.conf"
+mkdir -p "$PERSISTENT_STATE_DIR"
+printf persistent > "$PERSISTENT_STATE_DIR/state-probe"
 LOG_FILE="$test_root/extract.log"
 prepare_files "$old_archive" > "$test_root/rollback-progress"
 [[ "$(<"$INSTALL_DIR/VERSION")" == "$old_version" ]]
 [[ "$(<"$INSTALL_DIR/config/roms2.conf")" == 'KEEP_MY_CONFIG=1' ]]
+[[ "$(<"$INSTALL_DIR/state/state-probe")" == persistent ]]
+printf legacy > "$INSTALL_DIR/state/state-probe"
 prepare_files "$test_archive" > "$test_root/progress"
 [[ "$(<"$INSTALL_DIR/config/roms2.conf")" == 'KEEP_MY_CONFIG=1' ]]
 [[ "$(<"$INSTALL_DIR/VERSION")" == "$test_version" ]]
+[[ "$(<"$PERSISTENT_STATE_DIR/state-probe")" == legacy ]]
 rg -q '^100$' "$test_root/progress"
 
 # uninstall_has_sd2_games only reports true while an active bind registry exists.
-rm -f "$INSTALL_DIR/state/active-binds.tsv"
+rm -f "$PERSISTENT_STATE_DIR/active-binds.tsv"
 if uninstall_has_sd2_games; then
   printf 'uninstall_has_sd2_games should be false with no active binds\n' >&2
   exit 1
 fi
-mkdir -p "$INSTALL_DIR/state"
-printf 'card1\tpsx/game.zip\tfile\n' > "$INSTALL_DIR/state/active-binds.tsv"
+mkdir -p "$PERSISTENT_STATE_DIR"
+printf 'card1\tpsx/game.zip\tfile\n' > "$PERSISTENT_STATE_DIR/active-binds.tsv"
 uninstall_has_sd2_games || { printf 'uninstall_has_sd2_games should be true with active binds\n' >&2; exit 1; }
-rm -f "$INSTALL_DIR/state/active-binds.tsv"
+rm -f "$PERSISTENT_STATE_DIR/active-binds.tsv"
 
 # Cancelling the first uninstall confirmation removes nothing and leaves the
 # installed app in place.
@@ -117,14 +123,14 @@ if rg -q 'PROMPT: SD2 games will disconnect' "$test_root/events"; then
 fi
 
 # When games are actively bound from SD2, uninstalling shows the extra warning.
-mkdir -p "$INSTALL_DIR/state"
-printf 'card1\tpsx/game.zip\tfile\n' > "$INSTALL_DIR/state/active-binds.tsv"
+mkdir -p "$PERSISTENT_STATE_DIR"
+printf 'card1\tpsx/game.zip\tfile\n' > "$PERSISTENT_STATE_DIR/active-binds.tsv"
 printf '' > "$test_root/events"
 main
 rg -q 'PROMPT: Uninstall ROM Splitter' "$test_root/events"
 rg -q 'PROMPT: SD2 games will disconnect' "$test_root/events"
 [[ "$(rg -c '^STAGE:' "$test_root/events")" -eq 2 ]]
-rm -f "$INSTALL_DIR/state/active-binds.tsv"
+rm -f "$PERSISTENT_STATE_DIR/active-binds.tsv"
 
 # Uninstall remains available when the folder contains no release ZIPs.
 empty_packages="$test_root/no-zips"
@@ -142,11 +148,14 @@ unrelated_rom="$ROMS_DIR/psx/Keep Me.chd"
 mkdir -p "$(dirname "$unrelated_rom")" "$INSTALL_DIR"
 printf game > "$unrelated_rom"
 printf app > "$INSTALL_DIR/test-file"
+mkdir -p "$PERSISTENT_STATE_DIR"
+printf state > "$PERSISTENT_STATE_DIR/keep-state"
 sudo() { "$@"; }
 systemctl() { :; }
 LOG_FILE="$test_root/remove.log"
 remove_installed_files > "$test_root/remove-progress"
 [[ ! -e "$INSTALL_DIR" ]]
 [[ "$(<"$unrelated_rom")" == game ]]
+[[ "$(<"$PERSISTENT_STATE_DIR/keep-state")" == state ]]
 
 printf 'installer-flow-tests-ok\n'

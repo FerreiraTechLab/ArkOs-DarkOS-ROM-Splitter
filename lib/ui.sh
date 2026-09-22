@@ -511,11 +511,23 @@ scan_sd2_for_new_games() {
 }
 
 repair_storage_ui() {
-  local repair_rc gauge_rc new_binds=0 status_file
+  local repair_rc gauge_rc new_binds=0 status_file backup_dir=""
+  local -a orphan_candidates=()
   local -a pipeline_status
   if ! ui_backend_quiet mount_sd2; then
     ui_msg "Repair" "No ROMS2 card is available. Insert or activate a card, then retry."
     return 0
+  fi
+  mapfile -d '' -t orphan_candidates < <(orphan_placeholder_candidates)
+  if ((${#orphan_candidates[@]})); then
+    if ui_yesno "Recover SD2 links" \
+      "Found ${#orphan_candidates[@]} empty SD1 paths listed on SD2 but missing from the bind registry. They may be orphan placeholders.\n\nWith your approval, these empty paths will be backed up under /roms/tools, then SD2 links rebuilt. Non-empty SD1 files and folders will never be moved.\n\nRecover empty paths now?"; then
+      backup_dir="$(mktemp -d "$ROMS_ROOT/tools/.rom-splitter-recovery.XXXXXX")"
+      if ! ui_backend_quiet recover_orphan_placeholders "$backup_dir"; then
+        ui_msg "Repair" "Could not back up all empty paths. Check the log before trying again. Backup: $backup_dir"
+        return 0
+      fi
+    fi
   fi
   status_file="$(mktemp "$STATE_DIR/repair-status.XXXXXX")"
   set +e
@@ -528,7 +540,7 @@ repair_storage_ui() {
   rm -f -- "$status_file"
   if ((new_binds > 0)); then ES_RESTART_PENDING=1; fi
   if ((repair_rc == 0 && gauge_rc == 0)); then
-    ui_msg "Repair" "Bind mounts checked and rebuilt. Check the log for any conflicts."
+    ui_msg "Repair" "Bind mounts checked and rebuilt. Check the log for any conflicts.${backup_dir:+\n\nEmpty-path backup: $backup_dir}"
   else
     ui_msg "Repair" "Repair failed. Check the log for details."
   fi
